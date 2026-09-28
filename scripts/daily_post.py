@@ -42,7 +42,13 @@ def get_potd_filename(date):
     r = requests.get(api, params=params, headers=HEADERS, timeout=20)
     r.raise_for_status()
     wikitext = r.json()["parse"]["wikitext"]["*"]
-    m = re.search(r"\{\{Potd filename\|[^|]*\|([^|}]+)", wikitext)
+    # The template looks like:
+    #   {{Potd filename|1= Some File Name.jpg
+    #   <!-- comment -->|2=2026|3=09|4=28}}
+    # so capture everything after "1=" up to the newline or an HTML comment,
+    # rather than naively splitting on the next "|" (which lands inside the
+    # comment instead of the actual filename).
+    m = re.search(r"\{\{Potd filename\|1=\s*([^\n<]+)", wikitext)
     if not m:
         raise RuntimeError("could not find POTD filename for " + date.isoformat())
     return m.group(1).strip()
@@ -61,6 +67,8 @@ def get_image_info(filename):
     r.raise_for_status()
     pages = r.json()["query"]["pages"]
     page = next(iter(pages.values()))
+    if "imageinfo" not in page:
+        raise RuntimeError(f"no imageinfo for File:{filename!r}; response={page}")
     info = page["imageinfo"][0]
     url = info.get("thumburl") or info["url"]
     meta = info.get("extmetadata", {})
