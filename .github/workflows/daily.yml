@@ -1,0 +1,43 @@
+name: Daily LINE quote post
+
+on:
+  schedule:
+    - cron: "30 23 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install CJK fonts
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate today's image
+        run: python scripts/daily_post.py --step generate
+
+      - name: Commit generated image
+        run: |
+          git config user.name "line-daily-quote-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add images/
+          git commit -m "Add daily image $(date -u +%Y-%m-%d)" || echo "no changes to commit"
+          git push
+
+      - name: Push to LINE
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}
+        run: python scripts/daily_post.py --step push
