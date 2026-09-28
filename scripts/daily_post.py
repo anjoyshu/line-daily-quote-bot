@@ -23,11 +23,13 @@ FONT_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 SHUFFLE_SEED = 20260101
 EPOCH = dt.date(2026, 1, 1)
 
+HEADERS = {
+    "User-Agent": "line-daily-quote-bot/1.0 (https://github.com/anjoyshu/line-daily-quote-bot; anjoyshu@gmail.com)"
+}
 
 def taiwan_today():
     now_utc = dt.datetime.utcnow()
     return (now_utc + dt.timedelta(hours=8)).date()
-
 
 def get_potd_filename(date):
     api = "https://commons.wikimedia.org/w/api.php"
@@ -37,14 +39,13 @@ def get_potd_filename(date):
         "prop": "wikitext",
         "format": "json",
     }
-    r = requests.get(api, params=params, timeout=20)
+    r = requests.get(api, params=params, headers=HEADERS, timeout=20)
     r.raise_for_status()
     wikitext = r.json()["parse"]["wikitext"]["*"]
     m = re.search(r"\{\{Potd filename\|[^|]*\|([^|}]+)", wikitext)
     if not m:
         raise RuntimeError("could not find POTD filename for " + date.isoformat())
     return m.group(1).strip()
-
 
 def get_image_info(filename):
     api = "https://commons.wikimedia.org/w/api.php"
@@ -56,7 +57,7 @@ def get_image_info(filename):
         "iiurlwidth": 1600,
         "format": "json",
     }
-    r = requests.get(api, params=params, timeout=20)
+    r = requests.get(api, params=params, headers=HEADERS, timeout=20)
     r.raise_for_status()
     pages = r.json()["query"]["pages"]
     page = next(iter(pages.values()))
@@ -67,17 +68,14 @@ def get_image_info(filename):
     license_name = meta.get("LicenseShortName", {}).get("value", "")
     return url, artist, license_name
 
-
 def download_image(url):
-    r = requests.get(url, timeout=30)
+    r = requests.get(url, headers=HEADERS, timeout=30)
     r.raise_for_status()
     return Image.open(io.BytesIO(r.content)).convert("RGB")
-
 
 def load_quotes():
     with open("quotes.txt", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip()]
-
 
 def pick_quote(quotes, date):
     deck = list(range(len(quotes)))
@@ -86,7 +84,6 @@ def pick_quote(quotes, date):
     pos = day_index % len(deck)
     cycle = day_index // len(deck)
     return quotes[deck[pos]], cycle
-
 
 def compose(photo, quote_text, date, artist, license_name):
     width = photo.width
@@ -126,7 +123,6 @@ def compose(photo, quote_text, date, artist, license_name):
     draw.text((pad, y), credit, font=meta_font, fill=(150, 140, 120))
     return canvas
 
-
 def cmd_generate(args):
     today = taiwan_today()
     filename = get_potd_filename(today)
@@ -140,7 +136,6 @@ def cmd_generate(args):
     canvas.save(out_path, quality=90)
     print("saved", out_path)
     print("public_url=" + f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{out_path}")
-
 
 def cmd_push(args):
     today = taiwan_today()
@@ -169,7 +164,6 @@ def cmd_push(args):
     print(resp.status_code, resp.text)
     resp.raise_for_status()
 
-
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--step", choices=["generate", "push"], required=True)
@@ -178,7 +172,6 @@ def main():
         cmd_generate(args)
     else:
         cmd_push(args)
-
 
 if __name__ == "__main__":
     main()
