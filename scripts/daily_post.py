@@ -22,6 +22,7 @@ FONT_REGULAR = "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
 FONT_BOLD = "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
 SHUFFLE_SEED = 20260101
 EPOCH = dt.date(2026, 1, 1)
+QUOTE_PANEL_RATIO = 0.30  # bottom quote panel height as a fraction of the photo's height
 
 HEADERS = {
     "User-Agent": "line-daily-quote-bot/1.0 (https://github.com/anjoyshu/line-daily-quote-bot; anjoyshu@gmail.com)"
@@ -93,26 +94,55 @@ def pick_quote(quotes, date):
     cycle = day_index // len(deck)
     return quotes[deck[pos]], cycle
 
+def _fit_quote_layout(quote_text, width, pad, max_h):
+    """Pick a quote font size (largest that fits) and wrap width so the quote
+    block plus date/credit rows fit inside max_h; falls back to the smallest
+    size (letting it overflow slightly) if nothing fits."""
+    date_h = 22 + 14
+    divider_gap = 12 + 10
+    credit_h = 18
+    fixed_h = date_h + divider_gap + credit_h
+
+    best = None
+    for quote_size in range(34, 15, -2):
+        font = ImageFont.truetype(FONT_REGULAR, quote_size)
+        wrap_width = max(6, int(width / (quote_size * 0.62)))
+        wrapped = textwrap.wrap(quote_text, width=wrap_width)
+        line_h = int(quote_size * 1.55)
+        quote_block_h = line_h * len(wrapped)
+        total_h = fixed_h + quote_block_h
+        candidate = (quote_size, wrapped, line_h, quote_block_h, total_h)
+        if best is None:
+            best = candidate
+        if total_h <= max_h:
+            return candidate
+    return best
+
 def compose(photo, quote_text, date, artist, license_name):
     width = photo.width
     pad = 28
-    quote_font = ImageFont.truetype(FONT_REGULAR, 22)
     meta_font = ImageFont.truetype(FONT_REGULAR, 14)
     date_font = ImageFont.truetype(FONT_BOLD, 16)
 
-    wrapped = textwrap.wrap(quote_text, width=15)
-    line_h = 34
-    quote_block_h = line_h * len(wrapped)
+    target_panel_h = round(photo.height * QUOTE_PANEL_RATIO)
+    quote_size, wrapped, line_h, quote_block_h, content_h = _fit_quote_layout(
+        quote_text, width, pad, target_panel_h - 2 * pad
+    )
+    quote_font = ImageFont.truetype(FONT_REGULAR, quote_size)
+
+    # Panel is at least the requested ratio of the photo's height, but grows
+    # if the quote is long enough to need more room.
+    panel_h = max(target_panel_h, content_h + 2 * pad)
+    top_pad = pad + (panel_h - 2 * pad - content_h) // 2
 
     weekday_map = ["一", "二", "三", "四", "五", "六", "日"]
     date_str = date.strftime("%Y年%m月%d日") + " 星期" + weekday_map[date.weekday()]
 
-    panel_h = pad + 22 + 14 + quote_block_h + 12 + 10 + 18 + pad
     canvas = Image.new("RGB", (width, photo.height + panel_h), (250, 247, 240))
     canvas.paste(photo, (0, 0))
 
     draw = ImageDraw.Draw(canvas)
-    y = photo.height + pad
+    y = photo.height + top_pad
     draw.text((pad, y), date_str, font=date_font, fill=(90, 70, 40))
     y += 22 + 14
 
