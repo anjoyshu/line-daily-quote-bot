@@ -2,7 +2,10 @@ name: Daily LINE quote post
 
 on:
   schedule:
-    - cron: "30 23 * * *"
+    # Fires every 10 minutes across a window that safely covers 07:30 Asia/Taipei
+    # (23:30 UTC) plus a generous buffer for GitHub's scheduler delay.
+    - cron: "*/10 23 * * *"   # 07:00–07:50 Asia/Taipei
+    - cron: "*/10 0-3 * * *"  # 08:00–11:50 Asia/Taipei
   workflow_dispatch: {}
 
 permissions:
@@ -14,21 +17,55 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Check whether it's time to run
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Manually triggered - running."
+            exit 0
+          fi
+
+          TODAY_TW=$(TZ=Asia/Taipei date +%Y-%m-%d)
+          IMG="images/${TODAY_TW}.jpg"
+          if [ -f "$IMG" ]; then
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Already posted for $TODAY_TW - skipping."
+            exit 0
+          fi
+
+          NOW_H=$(TZ=Asia/Taipei date +%-H)
+          NOW_M=$(TZ=Asia/Taipei date +%-M)
+          NOW_MIN=$((NOW_H * 60 + NOW_M))
+          TARGET_MIN=$((7 * 60 + 30))
+          if [ "$NOW_MIN" -ge "$TARGET_MIN" ]; then
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+            echo "Past 07:30 Taipei and not yet posted today - running."
+          else
+            echo "should_run=false" >> "$GITHUB_OUTPUT"
+            echo "Before 07:30 Taipei - skipping for now."
+          fi
+
       - name: Install CJK fonts
+        if: steps.check.outputs.should_run == 'true'
         run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
 
       - name: Set up Python
+        if: steps.check.outputs.should_run == 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: steps.check.outputs.should_run == 'true'
         run: pip install -r requirements.txt
 
       - name: Generate today's image
+        if: steps.check.outputs.should_run == 'true'
         run: python scripts/daily_post.py --step generate
 
       - name: Commit generated image
+        if: steps.check.outputs.should_run == 'true'
         run: |
           git config user.name "line-daily-quote-bot"
           git config user.email "actions@users.noreply.github.com"
@@ -37,6 +74,7 @@ jobs:
           git push
 
       - name: Push to LINE
+        if: steps.check.outputs.should_run == 'true'
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_GROUP_ID: ${{ secrets.LINE_GROUP_ID }}
