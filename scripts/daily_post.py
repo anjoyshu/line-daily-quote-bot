@@ -50,10 +50,11 @@ def get_potd_filename(date):
     # The template looks like:
     #   {{Potd filename|1= Some File Name.jpg
     #   <!-- comment -->|2=2026|3=09|4=28}}
-    # so capture everything after "1=" up to the newline or an HTML comment,
-    # rather than naively splitting on the next "|" (which lands inside the
-    # comment instead of the actual filename).
-    m = re.search(r"\{\{Potd filename\|1=\s*([^\n<]+)", wikitext)
+    # or, on some days, all on one line:
+    #   {{Potd filename|1=Some File Name.jpg|2=2026|3=10|4=05}}
+    # so capture everything after "1=" up to the first newline, HTML comment,
+    # "|" or "}" (none of which can appear in a MediaWiki file name).
+    m = re.search(r"\{\{Potd filename\|1=\s*([^\n<|}]+)", wikitext)
     if not m:
         raise RuntimeError("could not find POTD filename for " + date.isoformat())
     return m.group(1).strip()
