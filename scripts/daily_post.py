@@ -52,11 +52,18 @@ def get_potd_filename(date):
     #   <!-- comment -->|2=2026|3=09|4=28}}
     # or, on some days, all on one line:
     #   {{Potd filename|1=Some File Name.jpg|2=2026|3=10|4=05}}
-    # so capture everything after "1=" up to the first newline, HTML comment,
-    # "|" or "}" (none of which can appear in a MediaWiki file name).
-    m = re.search(r"\{\{Potd filename\|1=\s*([^\n<|}]+)", wikitext)
-    if not m:
-        raise RuntimeError("could not find POTD filename for " + date.isoformat())
+    # or with a positional first parameter (no "1="), extra spaces, or a
+    # "File:" prefix. Capture the first parameter up to the first newline,
+    # HTML comment, "|" or "}" (none of which can appear in a file name).
+    m = re.search(
+        r"\{\{\s*Potd[ _]filename\s*\|\s*(?:1\s*=)?\s*(?:File:|Image:)?\s*([^\n<|}]+)",
+        wikitext,
+        re.IGNORECASE,
+    )
+    if not m or not m.group(1).strip():
+        raise RuntimeError(
+            f"could not find POTD filename for {date.isoformat()}; wikitext={wikitext[:300]!r}"
+        )
     return m.group(1).strip()
 
 def get_image_info(filename):
@@ -173,11 +180,34 @@ def compose(photo, quote_text, date, artist, license_name):
     draw.text((pad, y), credit, font=meta_font, fill=(150, 140, 120))
     return canvas
 
+def gh_annotate(level, message):
+    """Emit a GitHub Actions annotation so the reason shows on the run
+    summary page (and via the API), without having to open the raw logs."""
+    msg = str(message).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+    print(f"::{level}::{msg}", flush=True)
+
+def fetch_potd_photo(today, max_days_back=3):
+    """Get today's Picture of the Day; if that fails for any reason, fall
+    back to the previous days' pictures so the daily post still goes out."""
+    errors = []
+    for back in range(max_days_back + 1):
+        date = today - dt.timedelta(days=back)
+        try:
+            filename = get_potd_filename(date)
+            url, artist, license_name = get_image_info(filename)
+            photo = download_image(url)
+            if back:
+                gh_annotate("warning", f"POTD for {today} failed ({errors[0]}); used {date} instead")
+            print(f"using POTD {date}: {filename}")
+            return photo, artist, license_name
+        except Exception as e:  # noqa: BLE001 - try the next day on any failure
+            errors.append(f"{date}: {type(e).__name__}: {e}")
+            print("POTD attempt failed ->", errors[-1], flush=True)
+    raise RuntimeError("all POTD attempts failed: " + " || ".join(errors))
+
 def cmd_generate(args):
     today = taiwan_today()
-    filename = get_potd_filename(today)
-    url, artist, license_name = get_image_info(filename)
-    photo = download_image(url)
+    photo, artist, license_name = fetch_potd_photo(today)
     quotes = load_quotes()
     quote_text, _cycle = pick_quote(quotes, today)
     canvas = compose(photo, quote_text, today, artist, license_name)
@@ -218,10 +248,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--step", choices=["generate", "push"], required=True)
     args = parser.parse_args()
-    if args.step == "generate":
-        cmd_generate(args)
-    else:
-        cmd_push(args)
+    try:
+        if args.step == "generate":
+            cmd_generate(args)
+        else:
+            cmd_push(args)
+    except Exception as e:
+        gh_annotate("error", f"{args.step} failed: {type(e).__name__}: {e}")
+        raise
 
 if __name__ == "__main__":
     main()
