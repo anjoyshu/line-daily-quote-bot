@@ -6,10 +6,25 @@ on:
     # (23:30 UTC) plus a generous buffer for GitHub's scheduler delay.
     - cron: "*/10 23 * * *"   # 07:00–07:50 Asia/Taipei
     - cron: "*/10 0-3 * * *"  # 08:00–11:50 Asia/Taipei
-  workflow_dispatch: {}
+  # Primary trigger: an external cron service (cron-job.org) calls the GitHub
+  # API at 07:30 Taipei with inputs.force=false, because GitHub's own
+  # schedule above is often delayed by hours or skipped. The schedule stays
+  # as a backup; the "already posted today" check prevents double posts.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Post even if today's image already exists"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+
+# Never let two runs post at the same time; a queued run starts after the
+# first finishes, sees today's image already committed, and skips.
+concurrency:
+  group: daily-line-post
+  cancel-in-progress: false
 
 jobs:
   post:
@@ -20,9 +35,9 @@ jobs:
       - name: Check whether it's time to run
         id: check
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-            echo "Manually triggered - running."
+            echo "Manually triggered with force - running."
             exit 0
           fi
 
